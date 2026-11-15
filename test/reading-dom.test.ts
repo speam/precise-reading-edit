@@ -120,7 +120,7 @@ test("标题折叠指示器既不参与文本映射，也不触发编辑", () =>
 	});
 });
 
-test("链接、嵌入文档和无法精确定位的复杂区块不进入候选", () => {
+test("链接和嵌入文档不进入候选，引用、列表和表格走结构化定位", () => {
 	const { element, reading } = fixture();
 	const link = element("a").append(element("span").append(text("笔记链接")));
 	const embedded = element("p").append(text("其他文件的文字"));
@@ -135,8 +135,11 @@ test("链接、嵌入文档和无法精确定位的复杂区块不进入候选",
 		element("div", "callout").append(callout),
 	);
 
-	for (const target of [link, embedded, item, tableCell, callout, element("p")]) {
+	for (const target of [link, embedded, element("p")]) {
 		assert.equal(find(target), null);
+	}
+	for (const target of [item, tableCell, callout]) {
+		assert.equal(find(target)?.structured, true);
 	}
 });
 
@@ -150,6 +153,22 @@ test("浏览器在空白处给出相邻光标时仍拒绝跳转", () => {
 	assert.equal(capture(block, block, 80, 18), null);
 	assert.equal(capture(block, block, 20, 50), null);
 	assert.notEqual(capture(block, block, 20, 18), null);
+});
+
+test("有嵌套列表的任务项只映射自己的文字，不计入复选框和排版换行", () => {
+	const { document, element, reading } = fixture();
+	const label = text("外层任务\n");
+	const item = element("li").append(
+		element("input", "task-list-item-checkbox"), label,
+		element("ul").append(element("li").append(text("内层任务"))),
+		text("\n"),
+	);
+	reading.append(element("ul").append(item));
+	document.caret = { offsetNode: label, offset: 2 };
+	assert.deepEqual(capture(item, item), {
+		segments: [{ kind: "text", text: "外层任务" }],
+		hit: { index: 0, offset: 2 },
+	});
 });
 
 test("来自另一区块或窗口的浏览器光标不能被借用", () => {

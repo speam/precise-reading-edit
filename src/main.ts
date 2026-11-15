@@ -1,6 +1,7 @@
 import { MarkdownView, Plugin, type EditorPosition, type MarkdownPostProcessorContext } from "obsidian";
-import { captureReadingHit, findReadingBlock } from "./reading-dom";
+import { captureReadingHit, collectReadingBlocks, findReadingBlock } from "./reading-dom";
 import { resolvePosition } from "./resolve-position";
+import { resolveStructuredPosition } from "./structured-position";
 
 export default class PreciseReadingEdit extends Plugin {
 	private readonly renderContexts = new WeakMap<Element, MarkdownPostProcessorContext>();
@@ -41,24 +42,28 @@ export default class PreciseReadingEdit extends Plugin {
 		if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
 		const found = findReadingBlock(event.target);
 		if (!found) return;
-		const { target, block, readingView } = found;
+		const { target, block, readingView, structured } = found;
 
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const file = view?.file;
 		if (!view || !file || view.getMode() !== "preview" || !view.containerEl.contains(readingView) || this.pending.has(view)) return;
 
 		let context: MarkdownPostProcessorContext | undefined;
-		for (let element: Element | null = block; element && element !== readingView; element = element.parentElement) {
-			context = this.renderContexts.get(element);
+		let root: Element | null = block;
+		for (; root && root !== readingView; root = root.parentElement) {
+			context = this.renderContexts.get(root);
 			if (context) break;
 		}
-		if (!context || context.sourcePath !== file.path) return;
+		if (!root || !context || context.sourcePath !== file.path) return;
 		const section = context.getSectionInfo(block);
 		if (!section || section.text !== view.getViewData()) return;
 
 		const hit = captureReadingHit(block, target, event.clientX, event.clientY);
 		if (!hit) return;
-		const position = resolvePosition(section, hit.segments, hit.hit);
+		const blocks = structured ? collectReadingBlocks(root) : null;
+		const position = blocks
+			? resolveStructuredPosition(section, blocks, blocks.findIndex(candidate => candidate.element === block), hit.segments, hit.hit)
+			: resolvePosition(section, hit.segments, hit.hit);
 		if (!position) return;
 
 		event.preventDefault();

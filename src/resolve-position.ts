@@ -42,13 +42,24 @@ export function resolvePosition(
 ): SourcePosition | null {
 	const { text, lineStart, lineEnd } = section;
 	if (!Number.isInteger(lineStart) || !Number.isInteger(lineEnd) || lineStart < 0 || lineEnd < lineStart) return null;
-	if (!Number.isInteger(hit.index) || hit.index < 0 || hit.index >= rendered.length) return null;
-
 	const lines = text.split(/\r\n|\n|\r/);
 	if (lineEnd >= lines.length) return null;
 	const source = lines.slice(lineStart, lineEnd + 1).join("\n");
+	const offset = resolveBlockOffset(source, rendered, hit);
+	return offset === null ? null : toPosition(source, lineStart, offset);
+}
+
+export function resolveBlockOffset(
+	source: string,
+	rendered: readonly RenderedSegment[],
+	hit: SegmentHit,
+	literal = false,
+): number | null {
+	if (!Number.isInteger(hit.index) || hit.index < 0 || hit.index >= rendered.length) return null;
 	const { start, end } = contentBounds(source);
-	const segments = tokenize(source, start, end);
+	const segments: SourceSegment[] = [];
+	if (literal) appendText(segments, source, 0, source.length);
+	else appendInline(segments, source, start, end);
 
 	// 逐段校验整个区块。某一小段碰巧相同不足以确认来源。
 	if (segments.length !== rendered.length) return null;
@@ -57,12 +68,11 @@ export function resolvePosition(
 	}
 
 	const selected = segments[hit.index];
-	if (selected.kind === "math") return toPosition(source, lineStart, selected.start);
+	if (selected.kind === "math") return selected.start;
 	const offset = hit.offset;
 	if (offset === undefined || !Number.isInteger(offset) || offset < 0 || offset >= selected.boundaries.length) return null;
 	if (splitsSurrogatePair(selected.text, offset)) return null;
-	const boundary = selected.boundaries[offset];
-	return boundary === null ? null : toPosition(source, lineStart, boundary);
+	return selected.boundaries[offset];
 }
 
 function segmentMatches(source: SourceSegment, rendered: RenderedSegment): boolean {
@@ -84,12 +94,6 @@ function contentBounds(source: string): { start: number; end: number } {
 	const setext = /\n {0,3}(?:=+|-+)[ \t]*$/.exec(source);
 	if (setext) return { start: 0, end: setext.index };
 	return { start: 0, end: source.length };
-}
-
-function tokenize(source: string, start: number, end: number): SourceSegment[] {
-	const segments: SourceSegment[] = [];
-	appendInline(segments, source, start, end);
-	return segments;
 }
 
 function appendInline(segments: SourceSegment[], source: string, start: number, end: number): void {
@@ -135,9 +139,7 @@ function appendInline(segments: SourceSegment[], source: string, start: number, 
 		if (char === "*" || char === "_" || char === "~" || char === "=") {
 			const formatting = readSimpleFormatting(source, cursor, end);
 			if (formatting) {
-				for (let index = formatting.contentStart; index < formatting.contentEnd; index++) {
-					appendText(segments, source[index], index, index + 1);
-				}
+				appendInline(segments, source, formatting.contentStart, formatting.contentEnd);
 				cursor = formatting.end;
 				continue;
 			}
@@ -226,8 +228,8 @@ function readSimpleFormatting(source: string, start: number, limit: number): { c
 	if (contentEnd <= contentStart || contentEnd + size > limit) return null;
 	if (source[contentEnd - 1] === char || source[contentEnd + size] === char) return null;
 	const content = source.slice(contentStart, contentEnd);
-	// 这里只处理明确的单层格式。嵌套结构在整段不完全相符时保持阅读视图。
-	if (content !== content.trim() || /[\\`$*_~=\[\]<>&\n]/.test(content)) return null;
+	// 只处理明确的外层格式，允许正文里有行内公式与代码。
+	if (content !== content.trim() || /[\[\]<>\n]/.test(content)) return null;
 	return { contentStart, contentEnd, end: contentEnd + size };
 }
 
@@ -267,7 +269,7 @@ function splitsSurrogatePair(text: string, offset: number): boolean {
 	return previous >= 0xd800 && previous <= 0xdbff && current >= 0xdc00 && current <= 0xdfff;
 }
 
-function toPosition(source: string, lineStart: number, offset: number): SourcePosition {
+export function toPosition(source: string, lineStart: number, offset: number): SourcePosition {
 	const lines = source.slice(0, offset).split("\n");
 	return { line: lineStart + lines.length - 1, ch: lines[lines.length - 1].length };
 }

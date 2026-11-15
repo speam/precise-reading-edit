@@ -5,8 +5,8 @@ Double-click text or a formula in Obsidian's Reading view to edit it at the corr
 ## Usage
 
 1. Enable the plugin and open a note in Reading view.
-2. Double-click the heading, text, or formula you want to edit. For plain text, the plugin places the cursor at the corresponding character when it can verify the match. For a supported inline formula, the cursor goes to its opening `$`.
-3. If a complex block or ambiguous match prevents the plugin from finding a position, use Obsidian's view switcher to enter Editing view manually.
+2. Double-click the heading, text, or formula you want to edit. The plugin also checks text and formulas inside callouts, quotes, list items, and table cells, as well as the text of ordinary code blocks. A verified formula opens at its first `$`.
+3. Links, embeds, callout headers, and other controls keep their usual interactions. If the plugin cannot verify a source position, use Obsidian's view switcher to enter Editing view manually.
 
 Precise Reading Edit requires **Obsidian desktop 1.15.1 or later**. If another plugin also handles double-clicks in Reading view, disable that gesture or pause the other plugin to avoid conflicts.
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { resolveStructuredPosition } from "../src/structured-position";
 import { resolvePosition, type RenderedSegment } from "../src/resolve-position";
 
 const text = (value: string): RenderedSegment => ({ kind: "text", text: value });
@@ -107,4 +108,53 @@ test("不完整或失效的区块行号、点击段与字符偏移不会产生�
 		assert.equal(resolvePosition(section, rendered, hit), null);
 	}
 	assert.equal(resolvePosition({ ...section, lineEnd: 2 }, rendered, { index: 0, offset: 0 }), null);
+});
+test("Callout 正文和重复的独立公式保留各自的真实行与列", () => {
+	const source = [
+		"开头",
+		"",
+		"> [!solution]- 解析",
+		"> %% 来源 %%", ">", "> **选 B。** 结论 $x$。", ">",
+		"> $$", "> f(x)=x", "> $$", ">", "> ^one", ">",
+		"> $$", "> f(x)=x", "> $$",
+	].join("\r\n");
+	const s = { text: source, lineStart: 2, lineEnd: 15 };
+	const shape = [
+		{ kind: "paragraph", quotes: 1, items: 0 },
+		{ kind: "math", quotes: 1, items: 0 },
+		{ kind: "math", quotes: 1, items: 0 },
+	] as const;
+	assert.deepEqual(resolveStructuredPosition(s, shape, 0, [text("选 B。 结论 "), math(), text("。")], { index: 1 }), { line: 5, ch: 14 });
+	assert.deepEqual(resolveStructuredPosition(s, shape, 0, [text("选 B。 结论 "), math(), text("。")], { index: 0, offset: 6 }), { line: 5, ch: 12 });
+	assert.deepEqual(resolveStructuredPosition(s, shape, 2, [math(undefined, true)], { index: 0 }), { line: 13, ch: 2 });
+	assert.equal(resolveStructuredPosition(s, shape.slice(0, 2), 1, [math(undefined, true)], { index: 0 }), null);
+	assert.equal(resolveStructuredPosition(s, shape, 2, [math(undefined, false)], { index: 0 }), null);
+});
+
+test("嵌套 Callout 正文、任务列表、表格单元格和代码按区块定位", () => {
+	const source = [
+		"> [!note] 外层", "> > [!tip] 内层", "> > 重复文字", ">",
+		"> - [x] 重复文字", ">   - 重复文字", ">",
+		"> | A | B |", "> | --- | --- |", "> | 重复文字 | 重复文字 |", ">",
+		"> ```text", "> 重复文字", ">   重复文字", "> ```",
+	].join("\n");
+	const s = { text: source, lineStart: 0, lineEnd: 14 };
+	const shape = [
+		{ kind: "paragraph", quotes: 2, items: 0 },
+		{ kind: "paragraph", quotes: 1, items: 1 },
+		{ kind: "paragraph", quotes: 1, items: 2 },
+		{ kind: "th", quotes: 1, items: 0 },
+		{ kind: "th", quotes: 1, items: 0 },
+		{ kind: "td", quotes: 1, items: 0 },
+		{ kind: "td", quotes: 1, items: 0 },
+		{ kind: "code", quotes: 1, items: 0 },
+	] as const;
+	const resolve = (index: number, value = "重复文字", offset = 1) =>
+		resolveStructuredPosition(s, shape, index, [text(value)], { index: 0, offset });
+	assert.deepEqual(resolve(0), { line: 2, ch: 5 });
+	assert.deepEqual(resolve(1), { line: 4, ch: 9 });
+	assert.deepEqual(resolve(2), { line: 5, ch: 7 });
+	assert.deepEqual(resolve(6), { line: 9, ch: 12 });
+	assert.deepEqual(resolve(7, "重复文字\n  重复文字", 8), { line: 13, ch: 5 });
+	assert.equal(resolve(6, "错误文字"), null);
 });

@@ -1,9 +1,9 @@
 {
   "id": "precise-reading-edit",
   "name": "Precise Reading Edit",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "1.15.1",
-  "description": "双击阅读视图中的文字或公式，在能够确认对应 Markdown 源码位置时进入编辑视图.",
+  "description": "Double-click text or formulas in Reading view to edit at a verified Markdown source position.",
   "author": "Stephen Sun",
   "isDesktopOnly": true
 }
