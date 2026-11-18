@@ -29,6 +29,37 @@ test("公式定位到起始美元符号，左右的中文定位到字符", () =>
 	assert.deepEqual(resolvePosition(section, rendered, { index: 2, offset: 2 }), { line: 0, ch: prefix.length + tex.length + 4 });
 });
 
+test("行末隐藏块锚点时，两处公式和普通正文仍定位到原来的列", () => {
+	const prefix = "把正割写成 ";
+	const between = "。先排除 ";
+	const tail = " 的位置，图中的竖虚线就画在那里。";
+	const first = String.raw`\sec x=\frac{1}{\cos x}`;
+	const second = String.raw`\cos x=0`;
+	const paragraph = `${prefix}$${first}$${between}$${second}$${tail} ^formula-12-sec-csc`;
+	const section = { text: `上一段\r\n\r\n${paragraph}`, lineStart: 2, lineEnd: 2 };
+	const rendered = [text(prefix), math(first), text(between), math(second), text(tail)];
+
+	assert.deepEqual(resolvePosition(section, rendered, { index: 1 }), { line: 2, ch: prefix.length });
+	assert.deepEqual(resolvePosition(section, rendered, { index: 3 }), { line: 2, ch: paragraph.indexOf(`$${second}`) });
+	const hit = { index: 4, offset: tail.indexOf("竖虚线") };
+	const expected = { line: 2, ch: paragraph.indexOf("竖虚线") };
+	assert.deepEqual(resolvePosition(section, rendered, hit), expected);
+	assert.deepEqual(resolvePosition(section, [...rendered.slice(0, 4), text(`${tail} `)], hit), expected);
+	assert.equal(resolvePosition(section, [...rendered.slice(0, 4), text("另一段内容")], hit), null);
+});
+
+test("可见的锚点样式文字、转义插入符和代码保留字面内容", () => {
+	const hit = { index: 0, offset: 5 };
+	const paragraph = "原文 ^anchor";
+	assert.deepEqual(resolvePosition({ text: paragraph, lineStart: 0, lineEnd: 0 }, [text(paragraph)], hit), { line: 0, ch: 5 });
+	const escaped = { text: String.raw`原文 \^anchor`, lineStart: 0, lineEnd: 0 };
+	assert.deepEqual(resolvePosition(escaped, [text(paragraph)], hit), { line: 0, ch: 6 });
+	assert.equal(resolvePosition(escaped, [text("原文")], { index: 0, offset: 1 }), null);
+	const code = { text: `\`\`\`text\n${paragraph}\n\`\`\``, lineStart: 0, lineEnd: 2 };
+	const shape = [{ kind: "code", quotes: 0, items: 0 }] as const;
+	assert.equal(resolveStructuredPosition(code, shape, 0, [text("原文")], { index: 0, offset: 1 }), null);
+});
+
 test("完全重复的段落只在当前区块处理，同一区块的重复公式按完整渲染顺序定位", () => {
 	const paragraph = "甲 $x$ 乙 $x$ 丙";
 	const markdown = [paragraph, "", paragraph].join("\n");

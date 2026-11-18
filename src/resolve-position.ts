@@ -57,14 +57,23 @@ export function resolveBlockOffset(
 ): number | null {
 	if (!Number.isInteger(hit.index) || hit.index < 0 || hit.index >= rendered.length) return null;
 	const { start, end } = contentBounds(source);
-	const segments: SourceSegment[] = [];
+	let segments: SourceSegment[] = [];
 	if (literal) appendText(segments, source, 0, source.length);
 	else appendInline(segments, source, start, end);
 
-	// 逐段校验整个区块。某一小段碰巧相同不足以确认来源。
-	if (segments.length !== rendered.length) return null;
-	for (let index = 0; index < segments.length; index++) {
-		if (!segmentMatches(segments[index], rendered[index])) return null;
+	if (!segmentsMatch(segments, rendered)) {
+		if (literal) return null;
+		// Obsidian 会隐藏行末块锚点。仅在原样核对失败后，尝试匹配其前面的可见内容。
+		const anchor = /(?<=\S)([ \t]+)\^[a-zA-Z0-9-]+[ \t]*$/.exec(source.slice(start, end));
+		if (!anchor) return null;
+		const beforeAnchor = start + anchor.index;
+		// 前导空白有时仍保留在渲染后的文本节点中，仍须校验整段。
+		for (const visibleEnd of [beforeAnchor, beforeAnchor + anchor[1].length]) {
+			segments = [];
+			appendInline(segments, source, start, visibleEnd);
+			if (segmentsMatch(segments, rendered)) break;
+		}
+		if (!segmentsMatch(segments, rendered)) return null;
 	}
 
 	const selected = segments[hit.index];
@@ -73,6 +82,11 @@ export function resolveBlockOffset(
 	if (offset === undefined || !Number.isInteger(offset) || offset < 0 || offset >= selected.boundaries.length) return null;
 	if (splitsSurrogatePair(selected.text, offset)) return null;
 	return selected.boundaries[offset];
+}
+
+function segmentsMatch(source: readonly SourceSegment[], rendered: readonly RenderedSegment[]): boolean {
+	// 逐段校验整个区块。某一小段碰巧相同不足以确认来源。
+	return source.length === rendered.length && source.every((segment, index) => segmentMatches(segment, rendered[index]));
 }
 
 function segmentMatches(source: SourceSegment, rendered: RenderedSegment): boolean {
