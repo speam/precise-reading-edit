@@ -56,6 +56,22 @@ export function resolveBlockOffset(
 	literal = false,
 ): number | null {
 	if (!Number.isInteger(hit.index) || hit.index < 0 || hit.index >= rendered.length) return null;
+	const segments = matchBlock(source, rendered, literal);
+	if (!segments) return null;
+
+	const selected = segments[hit.index];
+	if (selected.kind === "math") return selected.start;
+	const offset = hit.offset;
+	if (offset === undefined || !Number.isInteger(offset) || offset < 0 || offset >= selected.boundaries.length) return null;
+	if (splitsSurrogatePair(selected.text, offset)) return null;
+	return selected.boundaries[offset];
+}
+
+export function matchesBlock(source: string, rendered: readonly RenderedSegment[], literal = false): boolean {
+	return matchBlock(source, rendered, literal) !== null;
+}
+
+function matchBlock(source: string, rendered: readonly RenderedSegment[], literal: boolean): SourceSegment[] | null {
 	const { start, end } = contentBounds(source);
 	let segments: SourceSegment[] = [];
 	if (literal) appendText(segments, source, 0, source.length);
@@ -76,12 +92,7 @@ export function resolveBlockOffset(
 		if (!segmentsMatch(segments, rendered)) return null;
 	}
 
-	const selected = segments[hit.index];
-	if (selected.kind === "math") return selected.start;
-	const offset = hit.offset;
-	if (offset === undefined || !Number.isInteger(offset) || offset < 0 || offset >= selected.boundaries.length) return null;
-	if (splitsSurrogatePair(selected.text, offset)) return null;
-	return selected.boundaries[offset];
+	return segments;
 }
 
 function segmentsMatch(source: readonly SourceSegment[], rendered: readonly RenderedSegment[]): boolean {

@@ -189,3 +189,72 @@ test("嵌套 Callout 正文、任务列表、表格单元格和代码按区块�
 	assert.deepEqual(resolve(7, "重复文字\n  重复文字", 8), { line: 13, ch: 5 });
 	assert.equal(resolve(6, "错误文字"), null);
 });
+
+test("Callout 里的正文和独立公式相邻时，按各自的源码行定位", () => {
+	const lines = [
+		"> [!math-formula] 和差角",
+		"> 看左边的加减号。",
+		">",
+		"> **正弦** $a$ 同号。",
+		"> $$",
+		"> f(x)=x",
+		"> $$",
+		">",
+		"> **余弦** 异号。",
+		"> $$",
+		"> f(x)=x",
+		"> $$",
+		"> 公式后可继续写正文。",
+		"> $$",
+		"> f(x)=x",
+		"> $$",
+		">",
+		"> ^formula-sum",
+	];
+	const section = { text: lines.join("\r\n"), lineStart: 0, lineEnd: lines.length - 1 };
+	const shape = ["paragraph", "paragraph", "math", "paragraph", "math", "paragraph", "math"]
+		.map(kind => ({ kind: kind as "paragraph" | "math", quotes: 1, items: 0 }));
+	for (const [index, line] of [[2, 4], [4, 9], [6, 13]]) {
+		assert.deepEqual(resolveStructuredPosition(section, shape, index, [math(undefined, true)], { index: 0 }), { line, ch: 2 });
+	}
+	const mnemonic = [text("正弦 "), math("a"), text(" 同号。")];
+	assert.deepEqual(resolveStructuredPosition(section, shape, 1, mnemonic, { index: 1 }), { line: 3, ch: 9 });
+	assert.deepEqual(resolveStructuredPosition(section, shape, 5, [text("公式后可继续写正文。")], { index: 0, offset: 2 }), { line: 12, ch: 4 });
+});
+
+test("区块结构不一致时，可双向核对的正文和公式仍能精确定位", () => {
+	const lines = [
+		"> [!note] 公式",
+		"> 第一个段落。",
+		">",
+		"> 中间的渲染方式不同。",
+		">",
+		"> $$",
+		"> f(x)=x",
+		"> $$",
+	];
+	const section = { text: lines.join("\n"), lineStart: 0, lineEnd: lines.length - 1 };
+	const paragraph = { kind: "paragraph", quotes: 1, items: 0 } as const;
+	const formula = { kind: "math", quotes: 1, items: 0 } as const;
+	const shape = [paragraph, paragraph, paragraph, formula];
+	const contents = [[text("第一个段落。")], [text("中间")], [text("变成了两段。")], [math(undefined, true)]];
+	const locate = (index: number, sibling = (i: number) => contents[i]) => resolveStructuredPosition(
+		section, shape, index, contents[index], { index: 0, offset: 2 }, sibling,
+	);
+	assert.deepEqual(locate(0), { line: 1, ch: 4 });
+	assert.deepEqual(locate(3), { line: 5, ch: 2 });
+	assert.equal(locate(1), null);
+	assert.equal(locate(0, () => contents[0]), null);
+
+	const duplicate = { ...section, text: [...lines, ">", "> 第一个段落。"].join("\n"), lineEnd: lines.length + 1 };
+	assert.equal(resolveStructuredPosition(duplicate, shape.slice(0, 3), 0, contents[0], { index: 0, offset: 2 }, i => contents[i]), null);
+});
+
+test("行内代码跨行时，单独成行的美元符号仍属于代码内容", () => {
+	const source = "> [!note] 记号\n> 看 \x60a\n> $$\n> x\n> $$\n> b\x60";
+	const shape = [{ kind: "paragraph", quotes: 1, items: 0 }] as const;
+	const result = resolveStructuredPosition(
+		{ text: source, lineStart: 0, lineEnd: 5 }, shape, 0, [text("看 a $$ x $$ b")], { index: 0, offset: 8 },
+	);
+	assert.deepEqual(result, { line: 3, ch: 3 });
+});

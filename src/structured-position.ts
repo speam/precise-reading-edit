@@ -1,7 +1,7 @@
 import { GFM, parser } from "@lezer/markdown";
 import type { SyntaxNode } from "@lezer/common";
 import type { BlockKind, BlockShape } from "./reading-dom";
-import { resolveBlockOffset, toPosition, type RenderedSegment, type SegmentHit, type SourceSection } from "./resolve-position";
+import { matchesBlock, resolveBlockOffset, toPosition, type RenderedSegment, type SegmentHit, type SourceSection } from "./resolve-position";
 
 const markdown = parser.configure(GFM);
 const calloutMarker = /^\[![\w-]+(?:\|[^\]\n]*)?\][+-]?(?=[ \t]|$)/;
@@ -19,6 +19,7 @@ export function resolveStructuredPosition(
 	selectedIndex: number,
 	rendered: readonly RenderedSegment[],
 	hit: SegmentHit,
+	readSibling?: (index: number) => readonly RenderedSegment[] | null,
 ) {
 	const { text, lineStart, lineEnd } = section;
 	const lines = text.split(/\r\n|\n|\r/);
@@ -27,15 +28,38 @@ export function resolveStructuredPosition(
 
 	const sectionSource = lines.slice(lineStart, lineEnd + 1).join("\n");
 	const blocks = collectSourceBlocks(sectionSource);
-	// 整个区块的顺序和容器层级必须一致，避免重复段落或相似公式跳到另一处。
-	if (blocks.length !== shape.length || blocks.some((block, index) =>
-		block.kind !== shape[index].kind || block.quotes !== shape[index].quotes || block.items !== shape[index].items
-	)) return null;
-
-	const block = blocks[selectedIndex];
+	// 结构完全一致时用顺序区分重复内容。否则，只采用当前区间内可双向确认的唯一匹配。
+	const aligned = blocks.length === shape.length && blocks.every((block, index) => sameShape(block, shape[index]));
+	const block = aligned ? blocks[selectedIndex] : findUniqueBlock(blocks, shape, selectedIndex, rendered, readSibling);
+	if (!block) return null;
 	const offset = resolveBlockOffset(block.text, rendered, hit, block.kind === "code");
 	if (offset === null || block.offsets[offset] === undefined) return null;
 	return toPosition(sectionSource, lineStart, block.offsets[offset]);
+}
+
+function sameShape(first: BlockShape, second: BlockShape): boolean {
+	return first.kind === second.kind && first.quotes === second.quotes && first.items === second.items;
+}
+
+function findUniqueBlock(
+	blocks: readonly SourceBlock[],
+	shape: readonly BlockShape[],
+	selectedIndex: number,
+	rendered: readonly RenderedSegment[],
+	readSibling: ((index: number) => readonly RenderedSegment[] | null) | undefined,
+): SourceBlock | null {
+	if (!readSibling) return null;
+	const selected = shape[selectedIndex];
+	const literal = selected.kind === "code";
+	const candidates = blocks.filter(block => sameShape(block, selected) && matchesBlock(block.text, rendered, literal));
+	if (candidates.length !== 1) return null;
+	const [block] = candidates;
+	for (let index = 0; index < shape.length; index++) {
+		if (index === selectedIndex || !sameShape(shape[index], selected)) continue;
+		const sibling = readSibling(index);
+		if (!sibling || matchesBlock(block.text, sibling, literal)) return null;
+	}
+	return block;
 }
 
 function collectSourceBlocks(source: string): SourceBlock[] {
@@ -83,6 +107,22 @@ function collectSourceBlocks(source: string): SourceBlock[] {
 			const isHeading = name !== "Paragraph" && name !== "Task";
 			const projected = projectLines(source, from, node.to, quotes, true, !isHeading);
 			if (!projected || !projected.text || hiddenParagraph.test(projected.text.trim())) return;
+			if (!isHeading) {
+				const formulas = displayFormulaRanges(projected, node);
+				if (formulas.length) {
+					let start = 0;
+					for (const formula of formulas) {
+						const end = formula.start === 0 ? 0 : formula.start - 1;
+						if (start < end) add("paragraph", projected.text.slice(start, end), projected.offsets.slice(start, end + 1), quotes, items);
+						add("math", projected.text.slice(formula.start, formula.end), projected.offsets.slice(formula.start, formula.end + 1), quotes, items);
+						start = formula.end + 1;
+					}
+					if (start < projected.text.length) {
+						add("paragraph", projected.text.slice(start), projected.offsets.slice(start), quotes, items);
+					}
+					return;
+				}
+			}
 			const kind = isHeading ? "heading" : /^\$\$(?!\$)[\s\S]*\$\$[ \t]*$/.test(projected.text) ? "math" : "paragraph";
 			add(kind, projected.text, projected.offsets, quotes, items);
 			return;
@@ -100,6 +140,30 @@ function collectSourceBlocks(source: string): SourceBlock[] {
 	};
 	visit(markdown.parse(source).topNode, 0, 0);
 	return blocks;
+}
+
+function displayFormulaRanges(projected: { text: string; offsets: number[] }, paragraph: SyntaxNode) {
+	const markers = Array.from(projected.text.matchAll(/^\$\$[ \t]*$/gm));
+	if (markers.length < 2) return [];
+
+	const inlineCode: Array<{ from: number; to: number }> = [];
+	paragraph.cursor().iterate(node => {
+		if (node.name === "InlineCode") inlineCode.push({ from: node.from, to: node.to });
+	});
+	const delimiters = markers.filter(marker => {
+		const offset = projected.offsets[marker.index];
+		return !inlineCode.some(code => code.from <= offset && offset < code.to);
+	});
+
+	const formulas: Array<{ start: number; end: number }> = [];
+	for (let index = 0; index + 1 < delimiters.length; index += 2) {
+		const open = delimiters[index];
+		const close = delimiters[index + 1];
+		if (projected.text.slice(open.index + open[0].length, close.index).trim()) {
+			formulas.push({ start: open.index, end: close.index + close[0].length });
+		}
+	}
+	return formulas;
 }
 
 function continuationPrefix(line: string, quotes: number, trimIndent: boolean): number | null {

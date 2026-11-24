@@ -94,11 +94,22 @@ export function captureReadingHit(block: HTMLElement, target: HTMLElement, x: nu
 			x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
 		)) return null;
 	}
-	const code = block.tagName === "CODE" && block.parentElement?.tagName === "PRE";
 	const doc = block.ownerDocument;
 	const caret = math ? null : caretAtPoint(doc, x, y);
 	if (!math && (!caret || !block.contains(caret.node) || !pointsToText(caret, doc, x, y))) return null;
+	const result = readBlock(block, caret, math);
+	return result?.hit ? { segments: result.segments, hit: result.hit } : null;
+}
 
+export function readRenderedSegments(block: Element): RenderedSegment[] | null {
+	return readBlock(block, null, null)?.segments ?? null;
+}
+
+function readBlock(block: Element, caret: Caret | null, math: Element | null): {
+	segments: RenderedSegment[];
+	hit: SegmentHit | null;
+} | null {
+	const code = block.tagName === "CODE" && block.parentElement?.tagName === "PRE";
 	const segments: RenderedSegment[] = [];
 	let text = "";
 	let hit: SegmentHit | null = null;
@@ -136,6 +147,5 @@ export function captureReadingHit(block: HTMLElement, target: HTMLElement, x: nu
 	if (code && text.endsWith("\n")) text = text.slice(0, -1);
 	if (block.tagName === "LI") text = text.trimEnd();
 	flushText();
-	if (!hit) return null;
 	return { segments, hit };
 }

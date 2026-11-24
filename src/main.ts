@@ -1,5 +1,5 @@
 import { MarkdownView, Plugin, type EditorPosition, type MarkdownPostProcessorContext } from "obsidian";
-import { captureReadingHit, collectReadingBlocks, findReadingBlock } from "./reading-dom";
+import { captureReadingHit, collectReadingBlocks, findReadingBlock, readRenderedSegments } from "./reading-dom";
 import { resolvePosition } from "./resolve-position";
 import { resolveStructuredPosition } from "./structured-position";
 
@@ -62,7 +62,10 @@ export default class PreciseReadingEdit extends Plugin {
 		if (!hit) return;
 		const blocks = structured ? collectReadingBlocks(root) : null;
 		const position = blocks
-			? resolveStructuredPosition(section, blocks, blocks.findIndex(candidate => candidate.element === block), hit.segments, hit.hit)
+			? resolveStructuredPosition(
+				section, blocks, blocks.findIndex(candidate => candidate.element === block),
+				hit.segments, hit.hit, index => readRenderedSegments(blocks[index].element),
+			)
 			: resolvePosition(section, hit.segments, hit.hit);
 		if (!position) return;
 

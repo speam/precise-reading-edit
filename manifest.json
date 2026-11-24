@@ -1,7 +1,7 @@
 {
   "id": "precise-reading-edit",
   "name": "Precise Reading Edit",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "minAppVersion": "1.15.1",
   "description": "Double-click text or formulas in Reading view to edit at a verified Markdown source position.",
   "author": "Stephen Sun",
